@@ -29,6 +29,7 @@ class SpatialFrequencyModule(nn.Module):
         
         # Xử lý luồng tần số bằng biến đổi Fourier 2D (FFT)
         fft_feat = torch.fft.rfft2(x, norm='ortho')
+        # Chuyển đổi kết quả FFT sang dạng thực và ảo để đưa vào Conv2d
         fft_cat = torch.cat([fft_feat.real, fft_feat.imag], dim=1)
         freq_feat = self.freq_conv(fft_cat)
         

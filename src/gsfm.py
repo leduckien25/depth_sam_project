@@ -26,6 +26,8 @@ class GSFM(nn.Module):
             F.interpolate(f, size=target_size, mode='bilinear', align_corners=False) 
             for f in refined_features
         ]
-        
+
+        # Gộp các đặc trưng đã được đồng bộ kích thước lại với nhau
         concat_feat = torch.cat(resized_feats, dim=1)
+
         return self.fusion_conv(concat_feat)

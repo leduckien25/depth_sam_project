@@ -31,10 +31,14 @@ class SparseMoEAdapter(nn.Module):
         batch_size, seq_len, dim = x.shape
         
         # Bước 1: Ông lễ tân (Gate) đánh giá xem token nào nên giao cho chuyên gia nào
+        # gate_logits: Điểm số của từng chuyên gia cho mỗi token
+        # weights: Trọng số xác suất của từng chuyên gia cho mỗi token
         gate_logits = self.gate(x)
         weights = F.softmax(gate_logits, dim=-1)
         
         # Bước 2: Chọn ra top_k chuyên gia có điểm số cao nhất cho từng token
+        # topk_weights: Trọng số của các chuyên gia được chọn
+        # topk_indices: Chỉ số của các chuyên gia được chọn
         topk_weights, topk_indices = torch.topk(weights, self.top_k, dim=-1)
         
         # Chuẩn hóa lại tổng trọng số của các chuyên gia được chọn cho bằng 1
