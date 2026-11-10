@@ -5,29 +5,21 @@ import torch.nn.functional as F
 from src.sfrm import SpatialFrequencyModule
 
 class GSFM(nn.Module):
-    def __init__(self, channel_list=[256, 256, 256, 256]):
+    def __init__(self, channels=256):
         super().__init__()
-        # Tạo danh sách các khối SFRM cho từng tầng đặc trưng của Decoder
-        self.sfrm_blocks = nn.ModuleList([
-            SpatialFrequencyModule(c) for c in channel_list
-        ])
-        # Lớp gộp cuối cùng (Fusion Conv)
-        self.fusion_conv = nn.Conv2d(sum(channel_list), channel_list[-1], kernel_size=1)
+        # 3 khối SFRM cho 3 bước trộn (công thức 2 của bài báo)
+        self.sfrm_43 = SpatialFrequencyModule(channels)   # bước 1: trộn F4 với F3
+        self.sfrm_32 = SpatialFrequencyModule(channels)   # bước 2: trộn kết quả với F2
+        self.sfrm_21 = SpatialFrequencyModule(channels)   # bước 3: trộn kết quả với F1
 
     def forward(self, features):
         # features là danh sách các tầng đặc trưng từ Decoder [F1, F2, F3, F4]
-        refined_features = []
-        for feat, block in zip(features, self.sfrm_blocks):
-            refined_features.append(block(feat))
-            
-        # Đồng bộ kích thước không gian của các tầng về cùng một cỡ để gộp lại
-        target_size = refined_features[0].shape[2:]
-        resized_feats = [
-            F.interpolate(f, size=target_size, mode='bilinear', align_corners=False) 
-            for f in refined_features
-        ]
+        # F4 nhỏ nhất (biết "vật nằm đâu") ... F1 lớn nhất (biết "biên ở đâu")
+        F1, F2, F3, F4 = features
 
-        # Gộp các đặc trưng đã được đồng bộ kích thước lại với nhau
-        concat_feat = torch.cat(resized_feats, dim=1)
-
-        return self.fusion_conv(concat_feat)
+        # Trộn NỐI TẦNG: kết quả bước trước là đầu vào của bước sau
+        #   Fo = SFRM(SFRM(SFRM(F4, F3), F2), F1)
+        x = self.sfrm_43(F4, F3)
+        x = self.sfrm_32(x, F2)
+        x = self.sfrm_21(x, F1)
+        return x

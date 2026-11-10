@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from depth_anything_v2.dpt import DepthAnythingV2
-from src.smea import SparseMoEAdapter
+from src.smea import SparseMoEAdapter, SMEABlock
 from src.gsfm import GSFM
 
 
@@ -40,17 +40,19 @@ class DepthSAM(nn.Module):
         for param in self.backbone.parameters():
             param.requires_grad = False
 
-        # 2. SMEA Adapters
-        self.smea_adapters = nn.ModuleList([
-            SparseMoEAdapter(dim=c, num_experts=4, top_k=2) for c in self.channel_list
-        ])
+        # 2. SMEA Adapters: đặt TRƯỚC mỗi Transformer Block của encoder (bài báo mục 3.2)
+        #    (tạo sau bước đóng băng nên tham số SMEA vẫn được train)
+        dim = self.backbone.pretrained.embed_dim
+        blocks = self.backbone.pretrained.blocks
+        for i in range(len(blocks)):
+            blocks[i] = SMEABlock(SparseMoEAdapter(dim=dim, num_experts=8, top_k=2), blocks[i])
 
-        # 3. Decoder GSFM
-        self.decoder_gsfm = GSFM(channel_list=self.channel_list)
+        # 3. Decoder GSFM: F1..F4 của decoder DPT đều có cfg["features"] kênh
+        self.decoder_gsfm = GSFM(channels=cfg["features"])
 
         # 4. Prediction Head
         self.pred_head = nn.Sequential(
-            nn.Conv2d(self.channel_list[-1], 64, kernel_size=3, padding=1),
+            nn.Conv2d(cfg["features"], 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
             nn.Conv2d(64, 1, kernel_size=1),
@@ -69,27 +71,31 @@ class DepthSAM(nn.Module):
             return_class_token=True,
         )
 
-        # 2. Chiếu số kênh qua depth_head.projects của DAv2
-        features = []
+        # 2. Đi qua decoder DPT của DAv2 (giống DPTHead.forward trong depth_anything_v2/dpt.py)
+        head = self.backbone.depth_head
+        layers = []
         for i, feat_tuple in enumerate(raw_features):
             patch_tokens = feat_tuple[0]  # [B, N, 1024]
             feat_map = patch_tokens.permute(0, 2, 1).reshape(b, -1, patch_h, patch_w)
-            
-            # Gọi qua depth_head.projects để hạ từ 1024 về [256, 512, 1024, 1024]
-            feat_map = self.backbone.depth_head.projects[i](feat_map)
-            features.append(feat_map)
+            feat_map = head.projects[i](feat_map)          # hạ số kênh
+            feat_map = head.resize_layers[i](feat_map)     # đổi kích thước: x4, x2, x1, x0.5
+            layers.append(feat_map)
 
-        # 3. Đi qua SMEA Adapters
-        refined_features = []
-        for feat, smea in zip(features, self.smea_adapters):
-            bc, c_dim, ch, cw = feat.shape
-            flat_feat = feat.flatten(2).transpose(1, 2)
-            refined_flat = smea(flat_feat)
-            refined_feat = refined_flat.transpose(1, 2).reshape(bc, c_dim, ch, cw)
-            refined_features.append(refined_feat)
+        layer_1 = head.scratch.layer1_rn(layers[0])
+        layer_2 = head.scratch.layer2_rn(layers[1])
+        layer_3 = head.scratch.layer3_rn(layers[2])
+        layer_4 = head.scratch.layer4_rn(layers[3])
+
+        path_4 = head.scratch.refinenet4(layer_4, size=layer_3.shape[2:])
+        path_3 = head.scratch.refinenet3(path_4, layer_3, size=layer_2.shape[2:])
+        path_2 = head.scratch.refinenet2(path_3, layer_2, size=layer_1.shape[2:])
+        path_1 = head.scratch.refinenet1(path_2, layer_1)
+
+        # 3. F1..F4 = path_1..path_4: 4 kích thước khác nhau (F1 lớn nhất, F4 nhỏ nhất)
+        features = [path_1, path_2, path_3, path_4]
 
         # 4. Dung hợp qua Decoder GSFM & Head
-        decoded_feat = self.decoder_gsfm(refined_features)
+        decoded_feat = self.decoder_gsfm(features)
         out = self.pred_head(decoded_feat)
         out = F.interpolate(out, size=original_size, mode="bilinear", align_corners=False)
 

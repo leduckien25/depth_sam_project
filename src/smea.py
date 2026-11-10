@@ -3,12 +3,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class SparseMoEAdapter(nn.Module):
-    def __init__(self, dim, num_experts=4, top_k=2):
+    def __init__(self, dim, num_experts=8, top_k=2, hidden=32):
         """
         Args:
             dim (int): Số chiều của đặc trưng (channel size) đi vào.
-            num_experts (int): Tổng số lượng "chuyên gia" (ở đây mặc định là 4 chuyên gia).
+            num_experts (int): Tổng số lượng "chuyên gia" (bài báo mục 4.1: 8 chuyên gia).
             top_k (int): Số lượng chuyên gia được chọn để xử lý cùng một lúc cho mỗi phần dữ liệu (chọn 2).
+            hidden (int): Số chiều ẩn của mỗi chuyên gia. Để nhỏ (32) vì SMEA được chèn vào cả 24 block.
         """
         super().__init__()
         self.num_experts = num_experts
@@ -20,9 +21,9 @@ class SparseMoEAdapter(nn.Module):
         # 2. Danh sách các "chuyên gia" (Experts): Mỗi chuyên gia là một mạng nhỏ (MLP) độc lập
         self.experts = nn.ModuleList([
             nn.Sequential(
-                nn.Linear(dim, dim * 2),
+                nn.Linear(dim, hidden),
                 nn.GELU(),
-                nn.Linear(dim * 2, dim)
+                nn.Linear(hidden, dim)
             ) for _ in range(num_experts)
         ])
 
@@ -54,5 +55,18 @@ class SparseMoEAdapter(nn.Module):
                 for k in range(self.top_k):
                     k_mask = mask[..., k].unsqueeze(-1)
                     out += expert_out * k_mask * topk_weights[..., k:k+1]
-                    
-        return out
+
+        # Bước 4: Residual (công thức 1 của bài báo): x_m = x + tổng có trọng số của các chuyên gia
+        return x + out
+
+
+class SMEABlock(nn.Module):
+    """Đặt SMEA TRƯỚC một Transformer Block (đã đóng băng) của encoder: x -> SMEA -> Block."""
+
+    def __init__(self, smea, block):
+        super().__init__()
+        self.smea = smea
+        self.block = block
+
+    def forward(self, x):
+        return self.block(self.smea(x))

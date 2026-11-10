@@ -10,7 +10,7 @@ from src.model import DepthSAM
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # 1. Nạp checkpoint DepthSAM tốt nhất
-checkpoint_path = r"weights/depthsam_best.pth"
+checkpoint_path = r"weights/depthsam_best_structure.pth"  # lần 1: weights/depthsam_best.pth
 model = DepthSAM(encoder_type="vitl", checkpoint_path=None).to(device)
 model.load_state_dict(torch.load(checkpoint_path, map_location=device))
 model.eval()
@@ -21,9 +21,9 @@ input_image_path = r"test/gecko.png"
 raw_img = Image.open(input_image_path).convert("RGB")
 orig_w, orig_h = raw_img.size
 
-# Bo tròn kích thước về bội số gần nhất của 14 (chuẩn patch size ViT)
-target_h = min(518, (orig_h // 14) * 14)
-target_w = min(518, (orig_w // 14) * 14)
+# Dùng ĐÚNG kích thước lúc train (378 = 27 x 14, xem src/dataset.py)
+target_h = 378
+target_w = 378
 
 transform = transforms.Compose([
     transforms.Resize((target_h, target_w)),
