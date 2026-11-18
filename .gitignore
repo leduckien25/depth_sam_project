@@ -4,4 +4,4 @@ __pycache__/
 *.pyd
 dataset/
 .vscode/
-weights/
+*.pth
