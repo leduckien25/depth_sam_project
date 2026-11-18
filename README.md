@@ -56,8 +56,7 @@ pip install torch torchvision opencv-python pillow numpy pysodmetrics
 ```
 
 ### Lấy file mô hình đã train (không cần train lại)
-File `.pth` nặng khoảng 1.4 GB nên không đưa lên GitHub được.
-1. Tải `depthsam_best_structure.pth` tại: **<LINK GOOGLE DRIVE>**
+1. Tải `depthsam_best_structure.pth` và `depth_anything_v2_vitl.pth`
 2. Đặt vào thư mục `weights/`.
 
 Chạy demo và đo điểm **không cần** file `depth_anything_v2_vitl.pth`. File đó chỉ cần khi train lại.
